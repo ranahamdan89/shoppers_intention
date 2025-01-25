@@ -1,0 +1,763 @@
+---
+title: "E-commerce Customer Behavior Analysis: Predicting Purchases"
+author: "Hamdan"
+date: "2024-11-22"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Understanding the data
+
+## Background of the project:
+
+In today’s digital world, e-commerce plays a huge role in how people shop. Understanding what drives online shoppers to make a purchase is key for businesses looking to stay competitive. This project focuses on exploring the Online Shoppers Purchasing Intention Dataset, a rich collection of data from over 12,000 unique website sessions recorded over a year. By analyzing this dataset, we can get a clearer picture of how visitors interact with an e-commerce site and what factors influence their buying decisions.
+
+The dataset includes details like the time visitors spend on different types of pages, how often they leave after viewing just one page, the impact of special days, and even technical details like the browser or operating system they use. The main goal is to figure out what separates sessions that lead to purchases from those that don’t.
+
+The project aims to analyze a comprehensive e-commerce dataset to gain insights into customer behavior and develop predictive models for purchase likelihood. I will explore various factors influencing online shopping behavior, including visitor type (new vs. returning), time spent on site, page views.
+
+## Data source 
+
+https://archive.ics.uci.edu/dataset/468/online+shoppers+purchasing+intention+dataset
+
+The dataset consists of feature vectors belonging to 12,330 sessions. 
+The dataset was formed so that each session
+would belong to a different user in a 1-year period to avoid
+any tendency to a specific campaign, special day, user
+profile, or period. 
+
+The definitions of the columns are:
+
+  * Month:(Categorical) - Month of the year when the session occurred.
+  * OperatingSystems: (Integer) - Operating system used by the visitor, encoded as integers.
+  * Browser: (Integer) - Browser used by the visitor, encoded as integers.
+  * Region: (Integer) - Geographic region of the visitor, encoded as integers.
+  * TrafficType: (Integer) - Source of traffic, encoded as integers.
+  * VisitorType: (Categorical) - Visitor type (Returning or New).
+  * Weekend: (Binary) - Indicates if the session was on a weekend (true/false).
+  * Revenue: Target (Binary) - Indicates if the session resulted in a transaction (true / false).
+  * Administrative: (Integer) - Number of administrative pages visited.
+  * Administrative_Duration: (Integer) - Total time spent on administrative pages (seconds).
+  * Informational: (Integer) - Number of informational pages visited.
+  * Informational_Duration: Feature (Integer) - Total time spent on informational pages (seconds).
+  * ProductRelated: (Integer) - Number of product-related pages visited.
+  * ProductRelated_Duration: (Continuous) - Total time spent on product-related pages (seconds).
+  * BounceRates: (Continuous) - Percentage of visitors who left after viewing only one page.
+  * ExitRates: (Continuous) - Percentage of times a page was the last page viewed.
+  * PageValues: (Continuous) - Average value of a page based on pre-transaction visits.
+  * SpecialDay: (Continuous) - Proximity of the visit to a special day, ranging from 0 to 1
+
+
+# Load necessary libraries
+
+```{r load_library}
+library(caret) 
+library(ggplot2)
+library(lattice)
+library(skimr) 
+library(dplyr)
+library(randomForest)
+library(class)
+library(tidyr)
+library(stringr)
+library(scales)
+library(plotly)
+library(forcats) 
+library(rpart)   
+library(rpart.plot)
+library(ROSE)
+```
+
+# Import the data
+
+```{r read_csv}
+
+data <- read.csv('data/online_shoppers_intention.csv' , stringsAsFactors = TRUE)
+```
+
+# Get a summary of the dataset
+
+
+Using the `skim` function to understand the summary of all the variables
+```{r skim_data}
+skim(data)
+```
+
+Using the `str` function to understand the data types of each of the variables
+
+```{r str_data}
+str(data)
+```
+
+Understanding the summary statistics of Dataset
+```{r summary}
+summary(data)
+```
+
+# Display the first few rows and basic information about the dataset
+
+```{r display_data}
+head(data)
+str(data)
+```
+
+# Check for missing values
+```{r}
+
+colSums(is.na(data))
+```
+
+The below table represents the counts of our target variable `Revenue`.
+```{r}
+table(data$Revenue)
+```
+# Recode 'Revenue' into a new binary column 
+
+```{r re-coding_target_variable}
+# Recode 'Revenue' into a new binary column with "False" as 0 and "True" as 1
+data <- data %>%
+  mutate(Revenue_binary = ifelse(Revenue == "TRUE", 1, 0))
+
+# Convert 'Revenue_binary' to a factor 
+data$Revenue_binary <- factor(data$Revenue_binary, levels = c("0", "1"))
+
+# Check the structure of the new column
+str(data$Revenue_binary)
+```
+
+
+# Validate the proportions of the new recoded variable Revenue_binary
+
+
+```{r prop.table_Revenue_binary}
+
+prop.table(table(data$Revenue_binary))
+```
+## Exploratory Data Analysis
+
+
+```{r}
+# Plot distribution of Revenue_binary
+
+ggplot(data, aes(x = Revenue_binary)) +
+  geom_bar(fill = "blue") +
+  labs(title = "Distribution of Revenue_binary", x = "Revenue (0 = No, 1 = Yes)", y = "Count")
+```
+
+> This chart shows a big imbalance: most sessions didn’t lead to purchases (0), while only a small number did (1). This is common in e-commerce but means we need to be careful when building models, as this imbalance could skew results. It also suggests there's room to improve strategies to boost conversions
+
+
+```{r}
+# Histogram for ProductRelated_Duration
+ggplot(data, aes(x = ProductRelated_Duration)) +
+  geom_histogram(bins = 30, fill = "orange", color = "black") +
+  labs(title = "Distribution of ProductRelated_Duration", x = "Time Spent on Product Pages", y = "Frequency")
+```
+
+> This chart shows the distribution of time visitors spent on product-related pages. Most visitors spent very little time, with the majority clustered near zero. There are a few sessions with significantly higher durations, indicating outliers. This skewed distribution suggests that many users may browse briefly, but only a small group engages deeply with product-related content.
+
+
+```{r}
+# Boxplot for BounceRates
+ggplot(data, aes(y = BounceRates)) +
+  geom_boxplot(fill = "green") +
+  labs(title = "Boxplot of BounceRates", y = "Bounce Rates")
+
+```
+
+> This boxplot shows that most sessions have very low bounce rates, meaning visitors tend to explore more than one page. However, there are some sessions with much higher bounce rates (the dots above), where users leave after just one page. These outliers might point to specific issues with certain pages or user experiences that need attention.
+
+
+
+```{r}
+# Revenue vs VisitorType
+
+ggplot(data, aes(x = VisitorType, fill = Revenue_binary)) +
+  geom_bar(position = "dodge") +
+  labs(title = "Revenue by Visitor Type", x = "Visitor Type", y = "Count")
+```
+
+
+> This chart shows that returning visitors are much more likely to make a purchase (Revenue_binary = 1) compared to new visitors, who rarely convert. Most visits, whether by new or returning users, do not result in revenue (Revenue_binary = 0). This highlights the importance of retaining and engaging repeat visitors to drive sales.
+
+```{r}
+# Revenue vs Weekend
+ggplot(data, aes(x = Weekend, fill = Revenue_binary)) +
+  geom_bar(position = "dodge") +
+  labs(title = "Revenue by Weekend Indicator", x = "Weekend", y = "Count")
+```
+
+> This chart shows that most purchases (Revenue_binary = 1) happen during weekdays (Weekend = FALSE), as weekdays have a significantly higher count of transactions. While weekends (Weekend = TRUE) see fewer visits overall, there is still a noticeable portion of revenue-generating sessions. This suggests that e-commerce activity and purchases are more concentrated on weekdays, potentially due to users browsing and buying during workdays.
+
+```{r}
+# Revenue vs BounceRates 
+ggplot(data, aes(x = Revenue_binary, y = BounceRates)) +
+  geom_boxplot(fill = "purple") +
+  labs(title = "Bounce Rates by Revenue", x = "Revenue (0 = No, 1 = Yes)", y = "Bounce Rates")
+
+```
+
+
+
+> This chart shows that sessions with no purchases (0) tend to have higher bounce rates, meaning visitors often leave after viewing just one page. On the other hand, sessions with purchases (1) generally have much lower bounce rates, indicating that people who stick around and explore the site are more likely to buy something.
+
+
+
+```{r}
+# Revenue vs ProductRelated_Duration
+ggplot(data, aes(x = Revenue_binary, y = ProductRelated_Duration)) +
+  geom_boxplot(fill = "pink") +
+  labs(title = "ProductRelated_Duration by Revenue", x = "Revenue (0 = No, 1 = Yes)", y = "Time Spent on Product Pages")
+```
+
+> This chart shows that people who make a purchase (1) usually spend more time on product pages compared to those who don’t (0). However, there’s still a lot of overlap between the two groups, meaning time spent on product pages isn’t the only factor that drives purchases. Still, the longer someone explores products, the more likely they are to buy.
+
+```{r}
+# Identify numeric columns in the dataset
+numeric_columns <- sapply(data , is.numeric)
+
+# Compute the correlation matrix for numeric columns
+corr_mat <- cor(data [, numeric_columns], use = "complete.obs")
+
+# Visualize the correlation matrix
+library(corrplot)
+corrplot(corr_mat, method = "circle")  # Change "circle" to "number", "color", etc., for different styles
+
+```
+
+
+
+```{r removing_unwanted_columns}
+data <- select(data, -Revenue )
+```
+
+
+
+
+
+## Partitioning the data
+
+
+```{r}
+# Partition the data: 80% training and 20% testing
+
+set.seed(17)
+trainIndex <- createDataPartition(data$Revenue_binary, p = 0.8, 
+                                  list = FALSE, 
+                                  times = 1)
+
+# Create training and testing datasets
+data_train <- data[as.vector(trainIndex), ]
+data_test <- data[-as.vector(trainIndex), ]
+
+
+```
+
+
+As the classes of the target variable are imbalanced,  checking if a similar proportion of both  classes are present in the training and the test dataset.
+
+
+```{r}
+# Validate the distribution of Revenue_binary in the training set
+table(data_train$Revenue_binary)
+prop.table(table(data_train$Revenue_binary))
+
+# Validate the distribution of Revenue_binary in the test set
+table(data_test$Revenue_binary)
+prop.table(table(data_test$Revenue_binary))
+```
+
+## Building and evaluation of predictive classification models
+
+
+### Model 1 : Null model
+
+```{r}
+
+# Null model for training data
+model_train_null <- rep(0, nrow(data_train))
+model_train_null <- factor(model_train_null, levels = levels(data_train$Revenue_binary))
+
+# Null model for test data
+model_test_null <- rep(0, nrow(data_test))
+model_test_null <- factor(model_test_null, levels = levels(data_test$Revenue_binary))
+
+# Confusion matrices for training and test sets
+cm_train_null <- confusionMatrix(model_train_null, data_train$Revenue_binary, positive = "1")
+cm_test_null <- confusionMatrix(model_test_null, data_test$Revenue_binary, positive = "1")
+
+# Print the confusion matrices
+print("Confusion Matrix for Training Data (Null Model):")
+print(cm_train_null)
+
+print("Confusion Matrix for Test Data (Null Model):")
+print(cm_test_null)
+
+```
+
+> The null model assumes no one makes a purchase, which gives a high accuracy (84.5%) because most sessions don’t result in revenue. However, it completely misses all purchases (sensitivity = 0%), making it useless for predicting buyers. This is just a starting point to compare better models that can actually identify sessions with purchases.
+
+
+### Model 2.1 : Logistic Regression 
+
+```{r Logistic_regression_model}
+# Logistic regression model
+Model_LR <- glm(Revenue_binary ~ Month + OperatingSystems + Browser + Region + 
+                TrafficType + VisitorType + Weekend + Administrative + 
+                Administrative_Duration + Informational + Informational_Duration + 
+                ProductRelated + ProductRelated_Duration + BounceRates + 
+                ExitRates + PageValues + SpecialDay,
+                data = data_train, family = binomial(link = "logit"))
+
+```
+
+```{r LR_Model_Fit}
+LR_fittedclass <- (Model_LR$fitted.values > 0.5)*1
+
+```
+
+```{r}
+# Evaluate the Model on Training Data
+LR1_Train_CM <- confusionMatrix(as.factor(LR_fittedclass), as.factor(data_train$Revenue_binary), positive="1")
+LR1_Train_CM
+
+```
+
+```{r logistic regression on test data}
+# Fit the Model on Test Data
+Model_LR1 <- glm(Revenue_binary ~ Month + OperatingSystems + Browser + Region + 
+                 TrafficType + VisitorType + Weekend + Administrative + 
+                 Administrative_Duration + Informational + Informational_Duration + 
+                 ProductRelated + ProductRelated_Duration + BounceRates + 
+                 ExitRates + PageValues + SpecialDay,
+                 data = data_test, family = binomial(link = "logit"), control = glm.control(maxit = 100))
+
+
+```
+
+```{r LR1_Pred}
+# Predict on Test Data and Evaluate
+LR1_Pred <- predict(Model_LR1, type = "response")
+LR1_Pred_Class <- (LR1_Pred > 0.5)*1
+
+LR1_Test_CM <- confusionMatrix(as.factor(LR1_Pred_Class), as.factor(data_test$Revenue_binary), positive="1")
+LR1_Test_CM
+
+```
+ 
+> The model achieves an accuracy of 87.79%, outperforming the baseline for thr Null model ( 84.5%) and showing excellent specificity (97.65%) in identifying no-purchase sessions. However, it struggles with sensitivity, detecting only 33.86% of actual purchases, reflecting difficulty in handling the minority class. Precision for predicting purchases is reasonable at 72.47%, but the model remains biased towards the majority class
+
+### Model 2.1: Logistic Regression with Important Variables
+
+```{r}
+
+
+# Logistic regression model with important variables
+Model_LR_important <- glm(Revenue_binary ~ PageValues + ExitRates + 
+                          ProductRelated_Duration + ProductRelated + 
+                          Month + BounceRates + Administrative_Duration + 
+                          Administrative,
+                          data = data_train, family = binomial(link = "logit"))
+
+# Evaluate the model on training data
+LR_fittedclass_important <- (Model_LR_important$fitted.values > 0.5) * 1
+
+# Confusion matrix for training data
+LR1_Train_CM_important <- confusionMatrix(
+  as.factor(LR_fittedclass_important), 
+  as.factor(data_train$Revenue_binary), 
+  positive = "1"
+)
+print(LR1_Train_CM_important)
+
+# Logistic regression on test data
+Model_LR1_important <- glm(Revenue_binary ~ PageValues + ExitRates + 
+                           ProductRelated_Duration + ProductRelated + 
+                           Month + BounceRates + Administrative_Duration + 
+                           Administrative,
+                           data = data_test, family = binomial(link = "logit"), 
+                           control = glm.control(maxit = 100))
+
+# Predict on test data and evaluate
+LR1_Pred_important <- predict(Model_LR1_important, type = "response")
+LR1_Pred_Class_important <- (LR1_Pred_important > 0.5) * 1
+
+# Confusion matrix for test data
+LR1_Test_CM_important <- confusionMatrix(
+  as.factor(LR1_Pred_Class_important), 
+  as.factor(data_test$Revenue_binary), 
+  positive = "1"
+)
+print(LR1_Test_CM_important)
+
+```
+> The training dataset shows high accuracy (~90%), strong specificity (~94%-96%), and moderate sensitivity (~59%-69%), indicating models perform well for non-purchases but moderately for purchases. On the testing dataset, accuracy is slightly lower (~89%), specificity remains high (~94%-96%), but sensitivity drops significantly (~33%-62%), highlighting challenges in detecting purchases and potential overfitting on the training data.
+
+### Model 3 : Decision Tree with all variables
+
+```{r model_tree1}
+
+# Train a decision tree model on the training dataset
+#model_tree1 <- rpart(Revenue_binary ~ ., data = data_train)
+model_tree1 <- rpart(Revenue_binary ~ Month + OperatingSystems + Browser + Region + 
+                TrafficType + VisitorType + Weekend + Administrative + 
+                Administrative_Duration + Informational + Informational_Duration + 
+                ProductRelated + ProductRelated_Duration + BounceRates + 
+                ExitRates + PageValues + SpecialDay,data = data_train)
+
+# Predict class labels on the training dataset
+class_train_tree1 <- predict(model_tree1, type = "class")
+
+# Evaluate the model using a confusion matrix
+cm_train_tree1 <- confusionMatrix(as.factor(class_train_tree1), as.factor(data_train$Revenue_binary), positive = "1")
+
+# Display the confusion matrix
+cm_train_tree1
+
+```
+
+> The decision tree model shows good overall accuracy (90.43%) and excels in identifying no-purchase sessions (specificity: 94.35%) but struggles to detect purchases, with a moderate sensitivity of 69.02%. This indicates the model is biased toward the majority class (no purchases). The Kappa score (0.6341) suggests moderate agreement beyond chance
+
+
+```{r pred_tree1}
+# Predict class labels on the test dataset
+pred_tree1 <- predict(model_tree1, newdata = data_test, type = "class")
+
+# Evaluate the model using a confusion matrix on the test dataset
+cm_test_tree1 <- confusionMatrix(as.factor(pred_tree1), as.factor(data_test$Revenue_binary), positive = "1")
+
+# Display the confusion matrix
+cm_test_tree1
+
+```
+
+> The decision tree model's performance on the test dataset shows good overall accuracy (89.05%) and high specificity (93.91%), effectively identifying no-purchase sessions. However, its sensitivity (62.47%) indicates it misses nearly 38% of actual purchases. 
+
+### Model 3.1 : Decision Tree with with important variables
+```{r}
+# Train a decision tree model on the training dataset with important variables
+model_tree1 <- rpart(Revenue_binary ~ BounceRates + ExitRates + PageValues + 
+                     ProductRelated_Duration + Administrative + 
+                     Informational_Duration + Month,
+                     data = data_train)
+
+# Predict class labels on the training dataset
+class_train_tree1 <- predict(model_tree1, type = "class")
+
+# Evaluate the model using a confusion matrix on the training dataset
+cm_train_tree1 <- confusionMatrix(
+  as.factor(class_train_tree1), 
+  as.factor(data_train$Revenue_binary), 
+  positive = "1"
+)
+
+# Display the confusion matrix for the training dataset
+cm_train_tree1
+
+# Predict class labels on the test dataset
+pred_tree1 <- predict(model_tree1, newdata = data_test, type = "class")
+
+# Evaluate the model using a confusion matrix on the test dataset
+cm_test_tree1 <- confusionMatrix(
+  as.factor(pred_tree1), 
+  as.factor(data_test$Revenue_binary), 
+  positive = "1"
+)
+
+# Display the confusion matrix for the test dataset
+cm_test_tree1
+```
+>
+The decision tree model performs well overall, with high accuracy (90.09% on training and 88.72% on testing) and specificity (94.57% and 94.10%, respectively), effectively identifying non-purchase sessions. However, sensitivity is moderate (65.62% on training and 59.32% on testing), indicating it struggles to detect a significant portion of actual purchases.
+
+### Model 4.1 : Random Forest with all the variables
+```{r  model_rf1}
+
+# Train a Random Forest model
+model_rf1 <- randomForest(Revenue_binary ~ ., data = data_train, importance = TRUE)
+
+# Predict class labels on the training dataset
+class_rf1 <- predict(model_rf1, type = "class")
+
+# Evaluate the model using a confusion matrix
+cm_train_rf1 <- confusionMatrix(as.factor(class_rf1), as.factor(data_train$Revenue_binary), positive = "1")
+
+# Display the confusion matrix
+cm_train_rf1
+
+```
+
+>The Random Forest model demonstrates good overall accuracy (90.76%) and high specificity (96.45%), effectively identifying the majority class (no purchases). However, its sensitivity (59.66%) shows that it misses over 40% of actual purchases, indicating limited performance on the minority class..
+
+
+
+```{r pred_rf1}
+# Predict class labels on the test dataset
+pred_rf1 <- predict(model_rf1, newdata = data_test, type = "class")
+
+# Evaluate the model using a confusion matrix on the test dataset
+cm_test_rf1 <- confusionMatrix(as.factor(pred_rf1), as.factor(data_test$Revenue_binary), positive = "1")
+
+# Display the confusion matrix
+cm_test_rf1
+
+```
+
+> The Random Forest model achieves good overall accuracy (89.45%) and high specificity (96.07%), but sensitivity is low at 53.28%, indicating difficulty in identifying the minority class (purchases). The model is biased towards the majority class, despite decent precision (71.23%).
+
+
+### Model 4.2 : Random Forest model with important variables
+```{r}
+# Extracting variable importance from the Random Forest model
+df_imp <- as.data.frame(model_rf1$importance) %>% 
+  arrange(desc(MeanDecreaseGini))  # Use MeanDecreaseGini for ranking
+
+# Converting row names (variable names) into a column for easier plotting
+df_imp <- tibble::rownames_to_column(df_imp, "variable")
+
+# Display the importance data
+print(df_imp)
+
+# Plotting the variable importance
+library(ggplot2)
+
+ggplot(data = df_imp) + 
+  geom_bar(aes(x = reorder(variable, MeanDecreaseGini), y = MeanDecreaseGini), 
+           stat = "identity", fill = "steelblue") + 
+  coord_flip() + 
+  theme_minimal() +
+  labs(title = "Variable Importance Plot", 
+       x = "Variables", 
+       y = "Mean Decrease in Gini") +
+  theme(axis.text = element_text(size = 10))
+
+```
+
+
+> The plot shows PageValues, ExitRates, and ProductRelated_Duration as the most important variables for predicting revenue, highlighting user engagement and page value as key drivers. Less important features like SpecialDay and Weekend may have minimal impact and could be excluded for model simplification.
+
+
+```{r}
+# Subset the data with only the most important variables
+important_vars <- c("PageValues", "ExitRates", "ProductRelated_Duration", 
+                    "ProductRelated", "Month", "BounceRates", 
+                    "Administrative_Duration", "Administrative", "TrafficType")
+
+# Train a Random Forest model using only important variables
+model_rf_important <- randomForest(
+  Revenue_binary ~ ., 
+  data = data_train[, c(important_vars, "Revenue_binary")], 
+  importance = TRUE
+)
+
+# Predict class labels on the training dataset
+class_rf_important_train <- predict(model_rf_important, type = "class")
+
+# Evaluate the model on the training dataset
+cm_train_rf_important <- confusionMatrix(
+  as.factor(class_rf_important_train), 
+  as.factor(data_train$Revenue_binary), 
+  positive = "1"
+)
+
+# Print the confusion matrix for the training dataset
+print(cm_train_rf_important)
+
+# Predict class labels on the test dataset
+class_rf_important_test <- predict(model_rf_important, newdata = data_test[, c(important_vars, "Revenue_binary")], type = "class")
+
+# Evaluate the model on the test dataset
+cm_test_rf_important <- confusionMatrix(
+  as.factor(class_rf_important_test), 
+  as.factor(data_test$Revenue_binary), 
+  positive = "1"
+)
+
+# Print the confusion matrix for the test dataset
+print(cm_test_rf_important)
+
+```
+
+>The Random Forest model achieves strong overall accuracy (90.52% on training, 89.45% on testing) and high specificity (95.97% and 95.83%, respectively), effectively identifying the majority class. However, sensitivity remains moderate (60.77% training, 54.59% testing), indicating limited performance in detecting the minority class (purchases). This highlights a need for better handling of imbalanced data.
+
+### Model 4.3 : Random Forest model with class weights
+```{r}
+# Train a Random Forest model with class weights
+model_rf_weighted <- randomForest(
+  Revenue_binary ~ ., 
+  data = data_train, 
+  importance = TRUE, 
+  classwt = c("0" = 0.3, "1" = 0.7)  # Adjust weights as needed
+)
+
+# Predict class labels on the training dataset
+class_rf_train_weighted <- predict(model_rf_weighted, type = "class")
+
+# Evaluate the model using a confusion matrix on the training dataset
+cm_train_rf_weighted <- confusionMatrix(
+  as.factor(class_rf_train_weighted), 
+  as.factor(data_train$Revenue_binary), 
+  positive = "1"
+)
+
+# Display the confusion matrix for the training dataset
+cm_train_rf_weighted
+
+
+```
+
+> The weighted Random Forest model achieves high accuracy (90.49%) and specificity (96.80%), but sensitivity is low (56.06%), indicating poor detection of the minority class (purchases). The model remains biased toward the majority class.
+
+```{r}
+
+# Predict class labels on the test dataset
+class_rf_test_weighted <- predict(model_rf_weighted, newdata = data_test, type = "class")
+
+# Evaluate the model using a confusion matrix on the test dataset
+cm_test_rf_weighted <- confusionMatrix(
+  as.factor(class_rf_test_weighted), 
+  as.factor(data_test$Revenue_binary), 
+  positive = "1"
+)
+
+# Display the confusion matrix for the test dataset
+cm_test_rf_weighted
+
+```
+
+> The weighted Random Forest model applied to the test dataset achieves high overall accuracy (89.49%) and specificity (96.40%), demonstrating strong performance in identifying the majority class (non-purchases). However, sensitivity is low (51.71%), indicating poor detection of the minority class (purchases)
+
+```{r}
+# Apply undersampling to balance the training data
+data_train_under <- ovun.sample(Revenue_binary ~ ., data = data_train, method = "under")$data
+
+# Check the class distribution after undersampling
+table(data_train_under$Revenue_binary)
+
+```
+
+
+```{r}
+# Train Random Forest model on undersampled data
+model_rf_under <- randomForest(
+  Revenue_binary ~ ., 
+  data = data_train_under, 
+  importance = TRUE
+)
+
+
+```
+
+
+```{r}
+# Predict class labels on the test dataset
+pred_rf_under <- predict(model_rf_under, newdata = data_test, type = "class")
+
+# Evaluate the model using a confusion matrix
+cm_test_rf_under <- confusionMatrix(
+  as.factor(pred_rf_under), 
+  as.factor(data_test$Revenue_binary), 
+  positive = "1"
+)
+
+# Display the confusion matrix
+cm_test_rf_under
+
+```
+
+> The undersampled Random Forest model improves sensitivity (82.68%), effectively detecting more purchases, and achieves balanced accuracy of 84.21%, and specificity drops to 85.75%. 
+
+```{r}
+table(data_test$Revenue_binary)
+
+```
+
+
+```{r}
+# Separate the majority and minority classes
+majority_class <- data_test %>% filter(Revenue_binary == 0)
+minority_class <- data_test %>% filter(Revenue_binary == 1)
+
+# Randomly sample from the majority class to match the minority class size
+set.seed(123)  # For reproducibility
+majority_class_under <- majority_class %>% sample_n(nrow(minority_class))
+
+# Combine the undersampled majority class with the minority class
+data_test_balanced <- bind_rows(majority_class_under, minority_class)
+
+# Shuffle the rows
+data_test_balanced <- data_test_balanced %>% sample_frac(1)
+
+# Check the class distribution
+table(data_test_balanced$Revenue_binary)
+
+```
+
+
+```{r}
+# Predict on the balanced test dataset
+pred_rf_balanced <- predict(model_rf_under, newdata = data_test_balanced, type = "class")
+
+# Evaluate using a confusion matrix
+cm_test_balanced <- confusionMatrix(
+  as.factor(pred_rf_balanced), 
+  as.factor(data_test_balanced$Revenue_binary), 
+  positive = "1"
+)
+
+# Display the confusion matrix
+cm_test_balanced
+
+```
+
+> The model achieved 85.83% accuracy with balanced accuracy of 85.83%, showing improved detection of purchases. Sensitivity (82.68%) and specificity (88.98%) indicate effective identification of both classes. Positive predictive value (88.24%) shows reliable purchase predictions. Balancing the test data improved fairness and overall performance, though with a slight trade-off in specificity.
+
+##  Model Comparison
+```{r}
+
+# Function to summarize confusion matrix results
+cm_summary <- function(cm, label){
+  sprintf("%s: Accuracy = %8.4f, Sensitivity = %8.4f, Specificity = %8.4f", 
+          label,
+          cm$overall["Accuracy"],
+          cm$byClass["Sensitivity"],
+          cm$byClass["Specificity"])
+}
+
+# Comparing results on training dataset
+print("Comparing the results on training dataset")
+cat(cm_summary(LR1_Train_CM, "Logistic Regression (All Variables)"), "\n")
+cat(cm_summary(LR1_Train_CM_important, "Logistic Regression (Important Variables)"), "\n")
+cat(cm_summary(cm_train_tree1, "Decision Tree (All Variables)"), "\n")
+cat(cm_summary(cm_train_rf1, "Random Forest (All Variables)"), "\n")
+cat(cm_summary(cm_train_rf_important, "Random Forest (Important Variables)"), "\n")
+cat(cm_summary(cm_train_rf_weighted, "Random Forest (Weighted)"), "\n")
+
+
+# Comparing results on test dataset
+print("Comparing the results on test dataset")
+cat(cm_summary(LR1_Test_CM, "Logistic Regression (All Variables)"), "\n")
+cat(cm_summary(LR1_Test_CM_important, "Logistic Regression (Important Variables)"), "\n")
+cat(cm_summary(cm_test_tree1, "Decision Tree (All Variables)"), "\n")
+cat(cm_summary(cm_test_rf1, "Random Forest (All Variables)"), "\n")
+cat(cm_summary(cm_test_rf_important, "Random Forest (Important Variables)"), "\n")
+cat(cm_summary(cm_test_rf_weighted, "Random Forest (Weighted)"), "\n")
+cat(cm_summary(cm_test_rf_under, "Random Forest (Undersampled)"), "\n")
+
+```
+## Conclusions 
+
+> Based on the results, the undersampled Random Forest model stands out for its superior performance in identifying purchases, achieving the highest sensitivity (83.99%) among all models. While its overall accuracy (85.52%) is slightly lower due to trade-offs with specificity (85.80%), it provides a balanced approach to handling the class imbalance, making it particularly effective for detecting the minority class. In contrast, models like the weighted Random Forest and Random Forest with important variables exhibit high overall accuracy (89.49% and 89.45%, respectively) and excellent specificity (>95%), but their sensitivity remains moderate, ranging from 52.76% to 54.59%. Logistic regression models, though reliable in specificity (>97%), struggle with low sensitivity (<34%), reflecting significant challenges in predicting purchases. Overall, the undersampled Random Forest offers the best balance between detecting purchases and avoiding overfitting to the majority class.
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+
+
+
